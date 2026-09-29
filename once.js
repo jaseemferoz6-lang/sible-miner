@@ -103,8 +103,16 @@ async function fetchOtp(since, timeoutMs) {
       .catch(() => fail('email box nahi mila'));
     await p.locator('input[type="password"]').first().fill(PASS, { timeout: 10000 })
       .catch(() => fail('password box nahi mila'));
-    await p.getByRole('button', { name: /^log ?in$/i }).first().click({ timeout: 10000 })
-      .catch(() => fail('Login button nahi mila'));
+    await p.screenshot({ path: 'login_form.png' }).catch(() => {});
+    const loginBtn = p.locator(
+      'button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in"), [role="button"]:has-text("Log in"), [role="button"]:has-text("Login")'
+    ).first();
+    let clicked = false;
+    try { await loginBtn.click({ timeout: 8000 }); clicked = true; } catch (e) {}
+    if (!clicked) {
+      console.log('Login button nahi mila, Enter dabata hoon...');
+      await p.locator('input[type="password"]').first().press('Enter').catch(() => {});
+    }
 
     await p.waitForURL(/verify-otp/, { timeout: 20000 })
       .catch(() => fail('OTP screen nahi aayi (galat password ya captcha?)'));
