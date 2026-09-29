@@ -1,0 +1,28 @@
+name: sible-miner
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+concurrency:
+  group: miner
+  cancel-in-progress: false
+jobs:
+  mine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm i playwright && npx playwright install --with-deps chromium
+      - run: echo "$STATE_B64" | base64 -d > state.json
+        env:
+          STATE_B64: ${{ secrets.STATE_B64 }}
+      - run: node once.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shots
+          path: "*.png"
+          if-no-files-found: ignore
