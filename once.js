@@ -162,14 +162,24 @@ async function fetchOtp(since, timeoutMs) {
 
     await p.screenshot({ path: 'otp_page.png' }).catch(() => {});
     try {
+      await closePopup(false);   // OTP page par bhi ad aa sakta hai
       const vis = p.locator('input:visible');
       const n = await vis.count();
       console.log('OTP page par visible input boxes:', n);
+      // debug: har input ki type/maxlength (values nahi) log karo
+      const info = await p.evaluate(() => [...document.querySelectorAll('input')].map(i =>
+        (i.type || '?') + '/max=' + (i.maxLength > 0 ? i.maxLength : '-') + '/' + (i.offsetParent ? 'vis' : 'hid')));
+      console.log('Inputs:', info.join(', '));
       if (n >= 6) {
         for (let i = 0; i < 6; i++) await vis.nth(i).fill(code[i], { timeout: 8000 });
       } else if (n >= 1) {
-        await vis.first().click({ timeout: 8000 });
+        // click nahi (overlay rok sakta hai): JS se focus karke asli key presses type karo
+        const inp = vis.first();
+        await inp.evaluate(el => el.focus());
         await p.keyboard.type(code, { delay: 150 });
+        const val = await inp.inputValue({ timeout: 2000 }).catch(() => '');
+        console.log('Input me digits ki tadaad:', val.length);
+        if (val.length < 6) await inp.fill(code, { force: true, timeout: 5000 }).catch(() => {});
       } else {
         // input hidden hai (custom boxes): JS se focus karke type karo
         await p.evaluate(() => { const i = document.querySelector('input'); if (i) i.focus(); });
@@ -179,6 +189,7 @@ async function fetchOtp(since, timeoutMs) {
       return fail('OTP box me code nahi ja saka: ' + String(e.message).split('\n')[0]);
     }
     await sleep(800);
+    await p.screenshot({ path: 'otp_filled.png' }).catch(() => {});
     await p.getByRole('button', { name: /^next$/i }).first().click({ timeout: 5000 }).catch(() => {});
 
     await navExt.waitFor({ timeout: 30000 }).catch(() => {});
