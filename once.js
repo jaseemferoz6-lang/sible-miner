@@ -11,6 +11,18 @@ const PASS = process.env.SIBLE_PASS;
 const IMAP_USER = process.env.OTP_IMAP_USER;
 const IMAP_PASS = process.env.OTP_IMAP_PASS;
 
+// Email ke text/html me se 6-digit code nikalo (123456, 123 456, 1 2 3 4 5 6 sab chalega)
+function extractCode(raw) {
+  const t = raw.replace(/&nbsp;/gi, ' ').replace(/[\u00a0\u200b\u200c\u2060]/g, ' ');
+  let m = t.match(/verification code\s*[:\-]?\s*(\d{6})(?!\d)/i) || t.match(/(?<!\d)(\d{6})(?!\d)/);
+  if (m) return m[1];
+  m = t.match(/(?<!\d)(\d{3})[\s\-]+(\d{3})(?!\d)/);
+  if (m) return m[1] + m[2];
+  m = t.match(/(?<!\d)(\d)[\s\-]+(\d)[\s\-]+(\d)[\s\-]+(\d)[\s\-]+(\d)[\s\-]+(\d)(?!\d)/);
+  if (m) return m.slice(1, 7).join('');
+  return null;
+}
+
 // Gmail (IMAP) se Sible ka 6-digit OTP parho. since = login dabane ka waqt (ms)
 // Inbox + All Mail + Spam teeno check karta hai, aur log me mail ka subject/sender likhta hai.
 async function fetchOtp(since, timeoutMs) {
@@ -38,11 +50,16 @@ async function fetchOtp(since, timeoutMs) {
             if (new Date(m.internalDate).getTime() < since - 30000) continue;   // purani email
             const parsed = await simpleParser(m.source);
             const subj = parsed.subject || '';
-            const text = (parsed.text || '') + ' ' + subj;
+            const htmlTxt = String(parsed.html || '')
+              .replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ');
+            const text = (parsed.text || '') + ' ' + htmlTxt + ' ' + subj;
             console.log('[' + box + '] mail mili: "' + subj + '" from ' + ((parsed.from && parsed.from.text) || '?'));
             if (!/code|verif|otp|sign|sible/i.test(text)) continue;
-            const hit = text.match(/verification code\s*[:\-]?\s*(\d{6})/i) || text.match(/\b(\d{6})\b/);
-            if (hit) return hit[1];
+            const code = extractCode(text);
+            if (code) return code;
+            // code nahi nikla: format dekhne ke liye body (digits '#' se chhupa kar) log karo
+            console.log('  -> code nahi nikla. Body format: ' +
+              text.replace(/\d/g, '#').replace(/\s+/g, ' ').trim().slice(0, 300));
           }
         } finally { lock.release(); }
       }
