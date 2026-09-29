@@ -9,17 +9,32 @@ concurrency:
 jobs:
   mine:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm i playwright && npx playwright install --with-deps chromium
+      - run: npm i playwright imapflow mailparser && npx playwright install --with-deps chromium
       - run: echo "$STATE_B64" | base64 -d > state.json
         env:
           STATE_B64: ${{ secrets.STATE_B64 }}
       - run: node once.js
+        env:
+          SIBLE_EMAIL: ${{ secrets.SIBLE_EMAIL }}
+          SIBLE_PASS: ${{ secrets.SIBLE_PASS }}
+          OTP_IMAP_USER: ${{ secrets.OTP_IMAP_USER }}
+          OTP_IMAP_PASS: ${{ secrets.OTP_IMAP_PASS }}
+      - name: Naya session secret me save karo
+        if: always() && hashFiles('relogin.flag') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: base64 -w0 state.json | gh secret set STATE_B64 --repo "$GITHUB_REPOSITORY"
+      - name: Login fail hua to runs rok do (OTP spam se bachne ke liye)
+        if: always() && hashFiles('login_failed.flag') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: gh workflow disable miner.yml --repo "$GITHUB_REPOSITORY" || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
