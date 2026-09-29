@@ -160,12 +160,23 @@ async function fetchOtp(since, timeoutMs) {
     if (!code) return fail('OTP email nahi mili (forward filter / spam / app password check karo).');
     console.log('OTP mil gaya, daal raha hoon.');
 
-    const boxes = p.locator('input');
-    if ((await boxes.count()) >= 6) {
-      for (let i = 0; i < 6; i++) await boxes.nth(i).fill(code[i]);
-    } else {
-      await boxes.first().click();
-      await p.keyboard.type(code, { delay: 150 });
+    await p.screenshot({ path: 'otp_page.png' }).catch(() => {});
+    try {
+      const vis = p.locator('input:visible');
+      const n = await vis.count();
+      console.log('OTP page par visible input boxes:', n);
+      if (n >= 6) {
+        for (let i = 0; i < 6; i++) await vis.nth(i).fill(code[i], { timeout: 8000 });
+      } else if (n >= 1) {
+        await vis.first().click({ timeout: 8000 });
+        await p.keyboard.type(code, { delay: 150 });
+      } else {
+        // input hidden hai (custom boxes): JS se focus karke type karo
+        await p.evaluate(() => { const i = document.querySelector('input'); if (i) i.focus(); });
+        await p.keyboard.type(code, { delay: 150 });
+      }
+    } catch (e) {
+      return fail('OTP box me code nahi ja saka: ' + String(e.message).split('\n')[0]);
     }
     await sleep(800);
     await p.getByRole('button', { name: /^next$/i }).first().click({ timeout: 5000 }).catch(() => {});
@@ -224,4 +235,7 @@ async function fetchOtp(since, timeoutMs) {
   }
 
   await b.close();
-})();
+})().catch(e => {
+  console.log('ERROR: ' + String(e && e.message).split('\n').slice(0, 3).join(' | '));
+  process.exit(1);
+});
