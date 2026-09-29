@@ -12,6 +12,7 @@ const IMAP_USER = process.env.OTP_IMAP_USER;
 const IMAP_PASS = process.env.OTP_IMAP_PASS;
 
 // Gmail (IMAP) se Sible ka 6-digit OTP parho. since = login dabane ka waqt (ms)
+// Inbox + All Mail + Spam teeno check karta hai, aur log me mail ka subject/sender likhta hai.
 async function fetchOtp(since, timeoutMs) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
@@ -22,19 +23,29 @@ async function fetchOtp(since, timeoutMs) {
         auth: { user: IMAP_USER, pass: IMAP_PASS }, logger: false,
       });
       await client.connect();
-      const lock = await client.getMailboxLock('INBOX');
+      const boxes = ['INBOX'];
       try {
-        const uids = await client.search(
-          { subject: 'sign-in code', since: new Date(Date.now() - 86400000) }, { uid: true });
-        for (const uid of [...uids].sort((a, b) => b - a)) {
-          const m = await client.fetchOne(uid, { source: true, internalDate: true }, { uid: true });
-          if (new Date(m.internalDate).getTime() < since - 20000) continue;   // purani email
-          const parsed = await simpleParser(m.source);
-          const text = (parsed.text || '') + ' ' + (parsed.subject || '');
-          const hit = text.match(/verification code\s*[:\-]?\s*(\d{6})/i) || text.match(/\b(\d{6})\b/);
-          if (hit) return hit[1];
-        }
-      } finally { lock.release(); }
+        for (const m of await client.list())
+          if (m.specialUse === '\\All' || m.specialUse === '\\Junk') boxes.push(m.path);
+      } catch (e) {}
+      for (const box of boxes) {
+        const lock = await client.getMailboxLock(box);
+        try {
+          const uids = await client.search({ since: new Date(Date.now() - 86400000) }, { uid: true });
+          const recent = [...uids].sort((a, b) => b - a).slice(0, 8);
+          for (const uid of recent) {
+            const m = await client.fetchOne(uid, { source: true, internalDate: true }, { uid: true });
+            if (new Date(m.internalDate).getTime() < since - 30000) continue;   // purani email
+            const parsed = await simpleParser(m.source);
+            const subj = parsed.subject || '';
+            const text = (parsed.text || '') + ' ' + subj;
+            console.log('[' + box + '] mail mili: "' + subj + '" from ' + ((parsed.from && parsed.from.text) || '?'));
+            if (!/code|verif|otp|sign|sible/i.test(text)) continue;
+            const hit = text.match(/verification code\s*[:\-]?\s*(\d{6})/i) || text.match(/\b(\d{6})\b/);
+            if (hit) return hit[1];
+          }
+        } finally { lock.release(); }
+      }
     } catch (e) {
       console.log('IMAP error:', e.message);
     } finally {
@@ -64,7 +75,7 @@ async function fetchOtp(since, timeoutMs) {
     return { x: (e.x + e.width / 2 + r.x + r.width / 2) / 2, y: e.y + e.height / 2 - 24 };
   }
 
-  async function closePopup() {
+  async function closePopup(useBall = true) {
     for (let i = 0; i < 3; i++) {
       if (!(await popupUp())) return;
       console.log('Popup mila, band kar raha hoon (try ' + (i + 1) + ')');
@@ -76,7 +87,7 @@ async function fetchOtp(since, timeoutMs) {
         .click({ timeout: 2000 }).catch(() => {});
       await sleep(1000);
       if (!(await popupUp())) return;
-      const pt = await ballPoint().catch(() => null);
+      const pt = useBall ? await ballPoint().catch(() => null) : null;
       if (pt) await p.mouse.click(pt.x, pt.y);
       await sleep(1500);
     }
@@ -97,18 +108,22 @@ async function fetchOtp(since, timeoutMs) {
       return fail('secrets nahi mile (SIBLE_EMAIL, SIBLE_PASS, OTP_IMAP_USER, OTP_IMAP_PASS).');
 
     if (!/\/login/.test(p.url())) await p.goto('https://mine.sible.network/login', { waitUntil: 'networkidle' });
+    await sleep(3000);
+    await closePopup(false);   // login page par ad/popup band karo
     let startedAt = Date.now();
 
     await p.locator('input:not([type="password"]):not([type="hidden"])').first().fill(EMAIL, { timeout: 10000 })
       .catch(() => fail('email box nahi mila'));
     await p.locator('input[type="password"]').first().fill(PASS, { timeout: 10000 })
       .catch(() => fail('password box nahi mila'));
+    await closePopup(false);   // fill ke baad bhi popup aa sakta hai
     await p.screenshot({ path: 'login_form.png' }).catch(() => {});
     const loginBtn = p.locator(
       'button[type="submit"], button:has-text("Log in"), button:has-text("Login"), button:has-text("Sign in"), [role="button"]:has-text("Log in"), [role="button"]:has-text("Login")'
     ).first();
     let clicked = false;
     try { await loginBtn.click({ timeout: 8000 }); clicked = true; } catch (e) {}
+    if (!clicked) { try { await loginBtn.click({ timeout: 5000, force: true }); clicked = true; } catch (e) {} }
     if (!clicked) {
       console.log('Login button nahi mila, Enter dabata hoon...');
       await p.locator('input[type="password"]').first().press('Enter').catch(() => {});
